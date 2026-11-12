@@ -1,0 +1,91 @@
+import { describe, expect, it } from "vitest";
+import { AETTIR, RUNES, RUNE_ORDER_NOTE, SPREADS, SPREAD_IDS } from "./data";
+import { buildRuneReading } from "./draw";
+import { NINE_WORLDS } from "./nine-worlds";
+import { serializeRunesToCompactJson, serializeRunesToStructuredText } from "./serializer";
+
+describe("elder futhark runes", () => {
+  it("keeps the twenty-four runes in three aettir of eight", () => {
+    expect(AETTIR).toHaveLength(3);
+    expect(RUNES).toHaveLength(24);
+    for (let aett = 0; aett < 3; aett += 1) {
+      expect(RUNES.filter((rune) => rune.aett === aett)).toHaveLength(8);
+    }
+    expect(new Set(RUNES.map((rune) => rune.id)).size).toBe(24);
+  });
+
+  it("marks the nine runes without a reverse interpretation in this data set", () => {
+    expect(RUNES.filter((rune) => rune.reversed === null)).toHaveLength(9);
+    for (const rune of RUNES) {
+      expect(rune.char.length).toBeGreaterThan(0);
+      expect(rune.path.length).toBeGreaterThan(0);
+      expect(rune.keywords.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("records the Kylver inscription's different thirteenth and fourteenth positions", () => {
+    // RuneS G 88 transliteration; IDs standardize differing glyph forms.
+    const kylver = ["fehu", "uruz", "thurisaz", "ansuz", "raidho", "kaunan", "gebo", "wunjo", "hagalaz", "nauthiz", "isa", "jera", "perthro", "eihwaz", "algiz", "sowilo", "tiwaz", "berkano", "ehwaz", "mannaz", "laguz", "ingwaz", "dagaz", "othala"];
+    const differences = RUNES.flatMap((rune, i) => rune.id === kylver[i] ? [] : [i + 1]);
+    expect(differences).toEqual([13, 14]);
+    expect(RUNE_ORDER_NOTE).toContain("Kylver");
+    const reading = buildRuneReading("kylver-audit", "three");
+    expect(serializeRunesToStructuredText(reading)).toContain(RUNE_ORDER_NOTE);
+    expect(JSON.parse(serializeRunesToCompactJson(reading)).runeOrderNote).toBe(RUNE_ORDER_NOTE);
+  });
+
+  it("defines four spreads whose positions fit their grids", () => {
+    expect(SPREAD_IDS).toEqual(["single", "three", "cross", "nine"]);
+    const expected = { single: 1, three: 3, cross: 5, nine: 9 } as const;
+    for (const id of SPREAD_IDS) {
+      const spread = SPREADS[id];
+      expect(spread.positions).toHaveLength(expected[id]);
+      for (const position of spread.positions) {
+        expect(position.col).toBeGreaterThanOrEqual(1);
+        expect(position.col).toBeLessThanOrEqual(spread.cols);
+        expect(position.row).toBeGreaterThanOrEqual(1);
+      }
+    }
+  });
+
+  it("does not claim the nine spread positions map onto nine worlds", () => {
+    expect(SPREADS.nine.tagline).not.toContain("对应九界");
+    expect(SPREADS.nine.positions.map((position) => position.name)).toEqual([
+      "The root", "Fading influence", "Recent event", "The situation", "The challenge", "The hidden", "Near future", "Guidance", "Outcome",
+    ]);
+    expect(NINE_WORLDS.find((world) => world.id === "helheim")?.note).toContain("病死及老死者");
+  });
+
+  it("draws deterministically from a seed without repeating a rune", () => {
+    const first = buildRuneReading("qmdj-seed", "nine");
+    const again = buildRuneReading("qmdj-seed", "nine");
+    expect(first.draws.map((draw) => draw.rune.id)).toEqual(again.draws.map((draw) => draw.rune.id));
+    expect(first.draws).toHaveLength(9);
+    expect(new Set(first.draws.map((draw) => draw.rune.id)).size).toBe(9);
+    for (const draw of first.draws) {
+      if (draw.orientation === "reversed") {
+        expect(draw.rune.reversed).not.toBeNull();
+      }
+    }
+    expect(buildRuneReading("another-seed", "nine").draws.map((draw) => draw.rune.id)).not.toEqual(first.draws.map((draw) => draw.rune.id));
+  });
+
+  it("serializes the reading and the nine worlds", () => {
+    const reading = buildRuneReading("seed", "three");
+    const text = serializeRunesToStructuredText(reading);
+    expect(text).toContain("The Three Norns");
+    expect(text).toContain("时间对应为现代解释");
+    expect(text).toContain("符文名称依后世语言材料重建");
+    expect(text).toContain("Yggdrasil");
+    expect(text).toContain(reading.draws[0].rune.name);
+
+    const payload = JSON.parse(serializeRunesToCompactJson(reading)) as { format: string; seed: string; draws: unknown[]; nineWorlds: unknown[]; sourceNote: string };
+    expect(payload.format).toBe("qmdj-runes-v1");
+    expect(payload.seed).toBe("seed");
+    expect(payload.sourceNote).toContain("现代解释");
+    expect(buildRuneReading(payload.seed, "three")).toEqual(reading);
+    expect(payload.draws).toHaveLength(3);
+    expect(payload.nineWorlds).toHaveLength(9);
+    expect(NINE_WORLDS.map((world) => world.level)).toContain("上");
+  });
+});
